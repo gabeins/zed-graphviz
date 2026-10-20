@@ -1,0 +1,33 @@
+# Configuration for cargo-about, which writes THIRD_PARTY_RUST.md (the
+# licences of the Rust crates compiled into graphviz-preview) for release
+# archives:
+#
+#     cargo about generate --all-features --frozen --fail -c about.toml about.hbs -o THIRD_PARTY_RUST.md
+
+# Licences we accept for code that ships in the binary.
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "MPL-2.0",
+]
+
+# One notices file goes into every archive, so cover every release target.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+
+# Build dependencies (Cranelift, which compiles the bundled Graphviz while
+# building) and test dependencies are not part of the binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true

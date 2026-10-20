@@ -1,6 +1,6 @@
 [package]
 name = "zed_dot"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 
@@ -9,4 +9,7 @@ path = "src/dot.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
-zed_extension_api = "0.2.0"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.11"
+tar = { version = "0.4", default-features = false }
+zed_extension_api = "0.7.0"

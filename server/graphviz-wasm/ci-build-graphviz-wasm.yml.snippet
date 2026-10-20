@@ -1,0 +1,55 @@
+# GitHub Actions job that builds server/graphviz-wasm/graphviz.wasm.
+#
+# Paste it under `jobs:` in a workflow. Jobs that embed the module declare
+# `needs: graphviz-wasm` and fetch it with actions/download-artifact:
+#
+#   - uses: actions/download-artifact@<pinned sha>
+#     with:
+#       name: graphviz-wasm
+#       path: server/graphviz-wasm
+#
+# build.sh downloads the pinned wasi-sdk release for the runner and checks it
+# against the SHA-256 recorded in the script, so the versions live in one
+# place. The cache only saves the downloads; every run still verifies them
+# and builds from pristine sources.
+
+  graphviz-wasm:
+    name: Build graphviz.wasm
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Cache source and toolchain downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: server/graphviz-wasm/.work/downloads
+          key: graphviz-wasm-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/graphviz-wasm/build.sh') }}
+
+      - name: Build
+        run: ./server/graphviz-wasm/build.sh
+        env:
+          JOBS: 4
+
+      - name: Record checksum
+        run: |
+          {
+            echo '### graphviz.wasm'
+            echo
+            echo '```'
+            cat server/graphviz-wasm/graphviz.wasm.sha256
+            echo '```'
+            echo "Size: $(wc -c < server/graphviz-wasm/graphviz.wasm) bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: graphviz-wasm
+          path: |
+            server/graphviz-wasm/graphviz.wasm
+            server/graphviz-wasm/graphviz.wasm.sha256
+          if-no-files-found: error

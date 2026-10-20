@@ -1,0 +1,66 @@
+[package]
+name = "graphviz-preview"
+version = "0.3.0"
+edition = "2021"
+license = "MIT"
+description = "Language server that renders Graphviz DOT files to PNG previews for the Zed editor"
+repository = "https://github.com/gabeins/zed-graphviz"
+publish = false
+
+# Standalone package: not part of the extension crate at the repository root.
+[workspace]
+
+[features]
+default = ["bundled"]
+# Embed a WebAssembly build of Graphviz so the server works without `dot`.
+# `build.rs` compiles it to native code, so only wasmtime's runtime ships.
+bundled = ["dep:wasmtime", "dep:wasmtime-wasi", "dep:cranelift-codegen"]
+
+[dependencies]
+base64 = "0.23"
+crossbeam-channel = "0.5"
+dark-light = "3"
+dirs = "7"
+lsp-server = "0.10"
+lsp-types = "0.97"
+resvg = "0.48"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+tempfile = "3"
+url = "2"
+wait-timeout = "0.2"
+which = "8"
+# The compiler is a build dependency only; keep both at exactly the same
+# version, since compiled modules only load into the wasmtime that made them.
+wasmtime = { version = "=49.0.4", optional = true, default-features = false, features = ["runtime", "std"] }
+wasmtime-wasi = { version = "=49.0.4", optional = true, default-features = false, features = ["p1"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
+[build-dependencies]
+# Cranelift backends for every release target (x86_64 and aarch64), so a
+# build can compile Graphviz for a target other than the machine it runs on.
+cranelift-codegen = { version = "=0.136.4", optional = true, default-features = false, features = ["x86", "arm64"] }
+sha2 = "0.11"
+# `async` only so the engine settings in src/engine_config.rs compile on both
+# sides; the server never calls into wasm asynchronously.
+wasmtime = { version = "=49.0.4", optional = true, default-features = false, features = ["async", "cranelift", "std"] }
+
+[dev-dependencies]
+png = "0.18"
+roxmltree = "0.21"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = true
+
+# build.rs runs Cranelift over the whole Graphviz module; an optimized
+# compiler keeps that step to seconds, in debug builds too.
+[profile.release.build-override]
+opt-level = 2
+
+[profile.dev.build-override]
+opt-level = 2

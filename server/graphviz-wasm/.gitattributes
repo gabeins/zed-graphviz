@@ -1,0 +1,3 @@
+# Patches must reach patch(1) byte for byte; their context lines legitimately
+# carry the whitespace of the Graphviz sources.
+*.patch text eol=lf -whitespace

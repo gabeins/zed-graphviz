@@ -1,0 +1,19 @@
+Include <unistd.h> for read() when mmap is unavailable.
+
+Without <sys/mman.h> (for example on wasm32-wasi) the PostScript user-shape
+loader falls back to read(), which is declared in <unistd.h>. The header is
+not otherwise included, so compilers that reject implicit function
+declarations fail to build the core plugin.
+
+--- a/plugin/core/gvloadimage_core.c
++++ b/plugin/core/gvloadimage_core.c
+@@ -17,6 +17,9 @@
+ #ifdef HAVE_SYS_MMAN_H
+ #include <sys/mman.h>
+ #endif
++#ifdef HAVE_UNISTD_H
++#include <unistd.h>
++#endif
+ 
+ #include "core_loadimage_xdot.h"
+ #include <common/utils.h>

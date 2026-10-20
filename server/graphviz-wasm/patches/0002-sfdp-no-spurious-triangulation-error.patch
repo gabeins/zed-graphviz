@@ -1,0 +1,61 @@
+Do not report a missing triangulation library when sfdp does not need one.
+
+Without GTS, sfdp turns off its own overlap removal (ntry < 0) and leaves
+overlap handling to the generic adjustment step, but it still calls
+remove_overlap() for the initial scaling. The stub used in builds without a
+triangulation library ignored ntry and always raised an error, so every sfdp
+layout failed with exit status 1 even though no triangulation was asked for.
+
+Apply the initial scaling the same way the full implementation does, and
+only report the missing library when overlap removal is actually requested.
+
+--- a/lib/neatogen/overlap.c
++++ b/lib/neatogen/overlap.c
+@@ -585,6 +585,23 @@
+ #else
+ #include <common/types.h>
+ #include <sparse/SparseMatrix.h>
++#ifdef SFDP
++#include <math.h>
++#include <sfdpgen/spring_electrical.h>
++#include <sparse/general.h>
++
++/* Same as the scaling step of the triangulation-based implementation. */
++static void scale_to_edge_length(int dim, SparseMatrix A, double *x, double avg_label_size){
++  double dist;
++
++  if (!A) return;
++  dist = average_edge_length(A, dim, x);
++  dist = avg_label_size / fmax(dist, MACHINEACC);
++
++  for (size_t i = 0; i < (size_t)dim * A->m; i++) x[i] *= dist;
++}
++#endif
++
+ void remove_overlap(int dim, SparseMatrix A, double *x, double *label_sizes, int ntry, double initial_scaling,
+ 		    int edge_labeling_scheme, int n_constr_nodes, int *constr_nodes, SparseMatrix A_constr, bool do_shrinking)
+ {
+@@ -602,6 +619,23 @@
+     (void)A_constr;
+     (void)do_shrinking;
+ 
++#ifdef SFDP
++    /* sfdp calls this with ntry < 0 when overlap removal is handled
++     * elsewhere; only the initial scaling is wanted then, and it does not
++     * need a triangulation library. */
++    if (label_sizes && initial_scaling < 0) {
++	double avg_label_size = 0;
++	for (size_t i = 0; i < A->m; i++)
++	    avg_label_size += label_sizes[(int)i * dim] + label_sizes[(int)i * dim + 1];
++	avg_label_size /= (double)A->m;
++	scale_to_edge_length(dim, A, x, -initial_scaling * avg_label_size);
++    } else if (label_sizes && initial_scaling > 0) {
++	scale_to_edge_length(dim, A, x, initial_scaling);
++    }
++#endif
++    if (!label_sizes || ntry <= 0)
++	return;
++
+     if (!atomic_flag_test_and_set(&once)) {
+ 	agerrorf("remove_overlap: Graphviz not built with triangulation library\n");
+     }

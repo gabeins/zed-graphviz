@@ -1,0 +1,26 @@
+# Third-party Rust crates in graphviz-preview
+
+The `graphviz-preview` binary is built from the Rust crates listed below.
+Their licences follow. The Graphviz WebAssembly module embedded in the
+binary is covered separately, in `THIRD_PARTY_NOTICES.md`.
+
+## Licences used
+
+{{#each overview}}
+- {{{name}}}: {{count}} crate{{#if (ne count 1)}}s{{/if}}
+{{/each}}
+
+{{#each licenses}}
+## {{{name}}}
+
+Used by:
+
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}{{#if crate.repository}} ({{crate.repository}}){{/if}}
+{{/each}}
+
+```text
+{{{text}}}
+```
+
+{{/each}}

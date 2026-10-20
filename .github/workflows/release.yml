@@ -1,0 +1,244 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-version:
+    name: Check versions
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Tag matches the extension and server versions
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          extension=$(sed -n 's/^version = "\(.*\)"/\1/p' extension.toml | head -n1)
+          crate=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          server=$(sed -n 's/^version = "\(.*\)"/\1/p' server/Cargo.toml | head -n1)
+          echo "tag=$version extension.toml=$extension Cargo.toml=$crate server/Cargo.toml=$server"
+          test "$version" = "$extension" && test "$version" = "$crate" && test "$version" = "$server"
+
+  # The same checks as for pull requests; nothing is published unless they pass.
+  checks:
+    name: Checks
+    needs: check-version
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  rust-notices:
+    name: Rust licence notices
+    needs: check-version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Rust and cargo-about
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo install cargo-about --locked --version 0.9.2 --features cli
+      - name: Generate THIRD_PARTY_RUST.md
+        working-directory: server
+        # --fail stops the release if any crate's licence cannot be
+        # identified or is not in the accepted list of about.toml.
+        run: cargo about generate --all-features --locked --fail -c about.toml about.hbs -o THIRD_PARTY_RUST.md
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rust-notices
+          path: server/THIRD_PARTY_RUST.md
+          if-no-files-found: error
+
+  graphviz-wasm:
+    name: Build graphviz.wasm
+    needs: check-version
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Only the downloads are cached; build.sh verifies them against the
+      # checksums it pins and always builds from pristine sources.
+      - name: Cache source and toolchain downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: server/graphviz-wasm/.work/downloads
+          key: graphviz-wasm-downloads-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('server/graphviz-wasm/build.sh') }}
+
+      - name: Build
+        run: ./server/graphviz-wasm/build.sh
+        env:
+          JOBS: 4
+
+      - name: Record checksum
+        run: |
+          {
+            echo '### graphviz.wasm'
+            echo
+            echo '```'
+            cat server/graphviz-wasm/graphviz.wasm.sha256
+            echo '```'
+            echo "Size: $(wc -c < server/graphviz-wasm/graphviz.wasm) bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: graphviz-wasm-release
+          path: |
+            server/graphviz-wasm/graphviz.wasm
+            server/graphviz-wasm/graphviz.wasm.sha256
+          if-no-files-found: error
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: [graphviz-wasm, rust-notices]
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-15
+          - target: x86_64-apple-darwin
+            os: macos-15
+          # The oldest supported Ubuntu keeps the glibc requirement low.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-22.04-arm
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: graphviz-wasm-release
+          path: server/graphviz-wasm
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rust-notices
+          path: notices
+      - name: Verify graphviz.wasm
+        working-directory: server/graphviz-wasm
+        run: |
+          expected=$(cut -d' ' -f1 graphviz.wasm.sha256)
+          if command -v sha256sum >/dev/null; then
+            actual=$(sha256sum graphviz.wasm | cut -d' ' -f1)
+          else
+            actual=$(shasum -a 256 graphviz.wasm | cut -d' ' -f1)
+          fi
+          echo "graphviz.wasm sha256 $actual"
+          test "$expected" = "$actual"
+      - name: Install Rust
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add "$TARGET"
+      - name: Build
+        working-directory: server
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo build --release --locked --target "$TARGET"
+      - name: Package
+        env:
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p dist package/graphviz-wasm
+          if [ "$TARGET" = x86_64-pc-windows-msvc ]; then
+            binary=graphviz-preview.exe
+          else
+            binary=graphviz-preview
+          fi
+          cp "server/target/$TARGET/release/$binary" package/
+          cp license package/LICENSE
+          cp notices/THIRD_PARTY_RUST.md package/
+          # Licences of the embedded Graphviz build, and the files that
+          # rebuild it (EPL-2.0 asks for the corresponding source).
+          cp server/graphviz-wasm/THIRD_PARTY_NOTICES.md package/
+          cp -R server/graphviz-wasm/licenses package/licenses
+          cp server/graphviz-wasm/build.sh server/graphviz-wasm/README.md \
+            server/graphviz-wasm/THIRD_PARTY_NOTICES.md package/graphviz-wasm/
+          cp -R server/graphviz-wasm/licenses server/graphviz-wasm/patches package/graphviz-wasm/
+          {
+            echo
+            echo "## Source of this release"
+            echo
+            echo "The build script, patches and notices used for $TAG are in this"
+            echo "archive's graphviz-wasm/ folder and at"
+            echo "<https://github.com/$REPO/tree/$TAG/server/graphviz-wasm>."
+          } >> package/THIRD_PARTY_NOTICES.md
+          # The extension unpacks .tar.gz itself after checking its SHA-256,
+          # so every platform, Windows included, gets the same format.
+          archive="graphviz-preview-$TARGET.tar.gz"
+          tar -czf "dist/$archive" -C package .
+          cd dist
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+          cat "$archive.sha256"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: graphviz-preview-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: [build, checks]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: graphviz-preview-*
+          path: dist
+          merge-multiple: true
+      # Assets are never replaced: the release is created as a draft (this
+      # fails if a release for the tag already exists), every file is
+      # uploaded (this fails if an asset already exists), and only then is
+      # the release published.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l dist
+          gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes "Graphviz extension $TAG"
+          gh release upload "$TAG" dist/*
+          gh release edit "$TAG" --draft=false

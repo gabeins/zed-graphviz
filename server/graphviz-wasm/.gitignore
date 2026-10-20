@@ -1,0 +1,4 @@
+# Build outputs of build.sh; the release workflow produces them.
+/graphviz.wasm
+/graphviz.wasm.sha256
+/.work/

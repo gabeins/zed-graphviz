@@ -1,6 +1,6 @@
 id = "graphviz"
 name = "Graphviz"
-version = "0.2.1"
+version = "0.3.0"
 schema_version = 1
 authors = ["Gabriel Silva <gabe@gabe.id>"]
 description = "Graphviz support."
@@ -13,3 +13,7 @@ commit = "9ab85550c896d8b294d9b9ca1e30698736f08cea"
 [language_servers.dot-language-server]
 name = "Graphviz DOT LSP"
 language = "DOT"
+
+[language_servers.graphviz-preview]
+name = "Graphviz Preview"
+languages = ["DOT"]
